@@ -1,10 +1,17 @@
 // Spaces – background service worker
-// Model: each space is a tab group (title = "<emoji> <name>") in the window.
-// Inactive spaces are either collapsed (default) or suspended (tabs saved + closed).
-// Native pinned tabs are never grouped, so they act as global pins across spaces.
+// Model: a space is a tab group titled "<emoji> <name>". A folder inside a space is another tab
+// group titled "<emoji> <name> › <folder>", so folders show up natively (and collapsible) in the
+// browser's tab strip / vertical sidebar. Inactive spaces have all their groups collapsed.
+// Existing tab groups are auto-detected as spaces. Native pinned tabs are swapped per space.
 
 const NONE = -1; // chrome.tabGroups.TAB_GROUP_ID_NONE
-const label = (s) => `${s.emoji || '📁'} ${s.name}`;
+const SEP = ' › ';
+const label = (s) => s.rawTitle || `${s.emoji || '📁'} ${s.name}`;
+const folderTitle = (s, f) => `${label(s)}${SEP}${f.name}`;
+const COLORS = {
+  grey: '#5f6368', blue: '#1a73e8', red: '#d93025', yellow: '#f9ab00', green: '#188038',
+  pink: '#d01884', purple: '#9334e6', cyan: '#007b83', orange: '#e8710a',
+};
 
 // ---------- serialisation ----------
 let queue = Promise.resolve();
@@ -16,17 +23,18 @@ const enqueue = (fn) => {
 
 // ---------- storage helpers ----------
 async function getState() {
-  const s = await chrome.storage.local.get(['spaces', 'settings']);
-  return { spaces: s.spaces || [], settings: { suspend: false, ...(s.settings || {}) } };
+  const s = await chrome.storage.local.get(['spaces']);
+  return { spaces: s.spaces || [] };
 }
 async function getSession() {
   const { groups = {}, active = {} } = await chrome.storage.session.get(['groups', 'active']);
   return { groups, active };
 }
-async function setGroupMapping(win, spaceId, groupId) {
+// key = spaceId for a space's main group, "spaceId:folderId" for a folder group
+async function setGroupMapping(win, key, groupId) {
   const { groups } = await getSession();
   groups[win] = groups[win] || {};
-  groups[win][spaceId] = groupId;
+  groups[win][key] = groupId;
   await chrome.storage.session.set({ groups });
 }
 async function mainWindowId() {
@@ -39,9 +47,9 @@ const normalWindows = () => chrome.windows.getAll({ windowTypes: ['normal'] });
 const expectedRemovals = new Set();
 
 // ---------- group lookup ----------
-async function findGroup(space, win) {
+async function findGroupKey(key, title, win) {
   const { groups } = await getSession();
-  const gid = groups[win]?.[space.id];
+  const gid = groups[win]?.[key];
   if (gid != null) {
     try {
       const g = await chrome.tabGroups.get(gid);
@@ -50,27 +58,69 @@ async function findGroup(space, win) {
   }
   // Adopt a group by title (handles browser session restore, where ids change)
   const all = await chrome.tabGroups.query({ windowId: win });
-  const g = all.find((x) => x.title === label(space));
+  const g = all.find((x) => x.title === title);
   if (g) {
-    await setGroupMapping(win, space.id, g.id);
+    await setGroupMapping(win, key, g.id);
     return g;
   }
   return null;
 }
+const findGroup = (space, win) => findGroupKey(space.id, label(space), win);
+const findFolderGroup = (space, f, win) => findGroupKey(`${space.id}:${f.id}`, folderTitle(space, f), win);
 
-async function spaceForGroup(groupId, win, spaces) {
+// All live groups of a space in a window: main group first, then folder groups.
+async function spaceGroups(space, win) {
+  const out = [];
+  const m = await findGroup(space, win);
+  if (m) out.push({ folderId: null, group: m });
+  for (const f of space.folders || []) {
+    const g = await findFolderGroup(space, f, win);
+    if (g) out.push({ folderId: f.id, group: g });
+  }
+  return out;
+}
+async function spaceTabs(space, win) {
+  const out = [];
+  for (const { folderId, group } of await spaceGroups(space, win)) {
+    const ts = (await chrome.tabs.query({ groupId: group.id })).sort((a, b) => a.index - b.index);
+    for (const t of ts) out.push({ tab: t, folderId });
+  }
+  return out;
+}
+
+// Which space (and folder) does a group belong to?
+async function spaceInfoForGroup(groupId, win, spaces) {
   if (groupId == null || groupId < 0) return null;
   const { groups } = await getSession();
-  for (const [sid, gid] of Object.entries(groups[win] || {})) if (gid === groupId) return sid;
-  try {
-    const g = await chrome.tabGroups.get(groupId);
-    const s = spaces.find((x) => label(x) === g.title);
-    if (s) {
-      await setGroupMapping(win, s.id, groupId);
-      return s.id;
+  for (const [key, gid] of Object.entries(groups[win] || {})) {
+    if (gid === groupId && spaces.some((s) => s.id === key.split(':')[0])) {
+      const [spaceId, folderId = null] = key.split(':');
+      return { spaceId, folderId };
     }
-  } catch {}
+  }
+  let g;
+  try {
+    g = await chrome.tabGroups.get(groupId);
+  } catch {
+    return null;
+  }
+  const title = g.title || '';
+  for (const s of spaces) {
+    if (label(s) === title) {
+      await setGroupMapping(win, s.id, groupId);
+      return { spaceId: s.id, folderId: null };
+    }
+    for (const f of s.folders || []) {
+      if (folderTitle(s, f) === title) {
+        await setGroupMapping(win, `${s.id}:${f.id}`, groupId);
+        return { spaceId: s.id, folderId: f.id };
+      }
+    }
+  }
   return null;
+}
+async function spaceForGroup(groupId, win, spaces) {
+  return (await spaceInfoForGroup(groupId, win, spaces))?.spaceId ?? null;
 }
 
 async function currentSpaceId(win, spaces) {
@@ -81,28 +131,67 @@ async function currentSpaceId(win, spaces) {
   return spaces.some((s) => s.id === active[win]) ? active[win] : null;
 }
 
-async function getTabFolders() {
-  return (await chrome.storage.session.get('tabFolders')).tabFolders || {};
+// ---------- auto-detect spaces from existing tab groups ----------
+const EMOJI_RE = /^(\p{Extended_Pictographic}[️‍\p{Extended_Pictographic}]*)\s*(.*)$/u;
+async function adoptGroups() {
+  const st = await getState();
+  let changed = false;
+  for (const w of await normalWindows()) {
+    const groups = await chrome.tabGroups.query({ windowId: w.id });
+    for (const g of groups) {
+      const title = (g.title || '').trim();
+      if (!title) continue; // untitled groups are adopted once they get a name
+      if (await spaceInfoForGroup(g.id, w.id, st.spaces)) continue;
+      // "<space title> › <folder>" under a known space → a folder of that space
+      const parent = st.spaces.find((s) => title.startsWith(label(s) + SEP));
+      if (parent) {
+        const name = title.slice(label(parent).length + SEP.length).trim();
+        if (name) {
+          const f = { id: crypto.randomUUID(), name, collapsed: !!g.collapsed };
+          parent.folders = [...(parent.folders || []), f];
+          await setGroupMapping(w.id, `${parent.id}:${f.id}`, g.id);
+          changed = true;
+          continue;
+        }
+      }
+      const m = title.match(EMOJI_RE);
+      const space = {
+        id: crypto.randomUUID(),
+        emoji: m ? m[1] : '📁',
+        name: (m ? m[2] : title) || title,
+        color: g.color || 'blue',
+        rawTitle: g.title, // keep the group's title exactly as the user wrote it
+        tabs: [],
+        folders: [],
+        activeIdx: 0,
+      };
+      st.spaces.push(space);
+      await setGroupMapping(w.id, space.id, g.id);
+      changed = true;
+    }
+  }
+  if (changed) await chrome.storage.local.set({ spaces: st.spaces });
+  return changed;
 }
+let adoptTimer;
+const scheduleAdopt = () => {
+  clearTimeout(adoptTimer);
+  adoptTimer = setTimeout(() => enqueue(adoptGroups).catch(() => {}), 800);
+};
 
-// ---------- snapshotting (keeps saved tabs fresh for suspend/restore & restarts) ----------
+// ---------- snapshotting (keeps saved tabs fresh for restarts) ----------
 async function snapshotWindow(spaces, win) {
   for (const s of spaces) {
-    const g = await findGroup(s, win);
-    if (!g) continue;
-    const tabs = (await chrome.tabs.query({ groupId: g.id })).sort((a, b) => a.index - b.index);
-    if (!tabs.length) continue;
+    const items = await spaceTabs(s, win);
+    if (!items.length) continue;
     const prev = new Map((s.tabs || []).map((x) => [x.url, x]));
-    const tf = await getTabFolders();
-    const known = new Set((s.folders || []).map((f) => f.id));
-    s.tabs = tabs.map((t) => {
+    s.tabs = items.map(({ tab: t, folderId }) => {
       const url = t.url || t.pendingUrl || '';
       const old = prev.get(url);
       const title = t.title && t.title !== url ? t.title : old?.title || t.title || '';
-      const folderId = known.has(tf[t.id]) ? tf[t.id] : undefined;
       return { url, title, favIconUrl: t.favIconUrl || old?.favIconUrl || '', ...(folderId ? { folderId } : {}) };
     });
-    const ai = tabs.findIndex((t) => t.active);
+    const ai = items.findIndex((x) => x.tab.active);
     if (ai >= 0) s.activeIdx = ai;
   }
   await snapshotPins(spaces, win);
@@ -140,27 +229,30 @@ async function snapshotPins(spaces, win) {
 // are kept as-is (never closed and reopened); only the differences are closed / created.
 async function swapPins(target, win) {
   lockPins(60000);
-  const want = (target.pins || []).filter((p) => p.url);
-  const cur = await chrome.tabs.query({ windowId: win, pinned: true });
-  const used = new Set();
-  const toClose = [];
-  for (const t of cur) {
-    const url = t.url || t.pendingUrl || '';
-    const i = want.findIndex((p, idx) => !used.has(idx) && p.url === url);
-    if (i >= 0) used.add(i);
-    else toClose.push(t.id);
-  }
-  // Create the new pins first so the window can never be left without a tab, then close the old ones.
-  for (let i = 0; i < want.length; i++) {
-    if (used.has(i)) continue;
-    try {
-      const t = await chrome.tabs.create({ windowId: win, url: want[i].url, pinned: true, active: false });
-    } catch (e) {
-      console.warn('Spaces: could not restore pinned tab', want[i].url, e);
+  try {
+    const want = (target.pins || []).filter((p) => p.url);
+    const cur = await chrome.tabs.query({ windowId: win, pinned: true });
+    const used = new Set();
+    const toClose = [];
+    for (const t of cur) {
+      const url = t.url || t.pendingUrl || '';
+      const i = want.findIndex((p, idx) => !used.has(idx) && p.url === url);
+      if (i >= 0) used.add(i);
+      else toClose.push(t.id);
     }
+    // Create the new pins first so the window can never be left without a tab, then close the old ones.
+    for (let i = 0; i < want.length; i++) {
+      if (used.has(i)) continue;
+      try {
+        await chrome.tabs.create({ windowId: win, url: want[i].url, pinned: true, active: false });
+      } catch (e) {
+        console.warn('Spaces: could not restore pinned tab', want[i].url, e);
+      }
+    }
+    if (toClose.length) await chrome.tabs.remove(toClose).catch(() => {});
+  } finally {
+    lockPins();
   }
-  if (toClose.length) await chrome.tabs.remove(toClose).catch(() => {});
-  lockPins();
 }
 
 let snapTimer;
@@ -179,37 +271,82 @@ function scheduleSnapshot() {
   );
 }
 
+// ---------- toolbar icon follows the active space ----------
+function drawIcon(size, emoji, color) {
+  const c = new OffscreenCanvas(size, size);
+  const x = c.getContext('2d');
+  x.fillStyle = color;
+  x.beginPath();
+  x.roundRect(0, 0, size, size, size * 0.22);
+  x.fill();
+  x.font = `${Math.round(size * 0.68)}px sans-serif`;
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText(emoji, size / 2, size / 2 + size * 0.06);
+  return x.getImageData(0, 0, size, size);
+}
+async function updateIcon() {
+  try {
+    const win = await mainWindowId();
+    const { spaces } = await getState();
+    const cur = await currentSpaceId(win, spaces);
+    const s = spaces.find((x) => x.id === cur);
+    if (!s) {
+      await chrome.action.setIcon({ path: { 16: 'icons/16.png', 32: 'icons/32.png', 48: 'icons/48.png' } });
+      await chrome.action.setTitle({ title: 'Spaces' });
+      return;
+    }
+    const col = COLORS[s.color] || '#5f6368';
+    await chrome.action.setIcon({
+      imageData: { 16: drawIcon(16, s.emoji || '📁', col), 32: drawIcon(32, s.emoji || '📁', col), 48: drawIcon(48, s.emoji || '📁', col) },
+    });
+    await chrome.action.setTitle({ title: `Spaces — ${s.name}` });
+  } catch (e) {
+    console.warn('Spaces: icon update failed', e);
+  }
+}
+let iconTimer;
+const scheduleIcon = () => {
+  clearTimeout(iconTimer);
+  iconTimer = setTimeout(updateIcon, 150);
+};
+
 // ---------- core operations ----------
 async function restoreSpace(space, win) {
   const saved = space.tabs?.length ? space.tabs : [{ url: '' }];
   const ai = Math.min(Math.max(space.activeIdx || 0, 0), saved.length - 1);
+  const known = new Set((space.folders || []).map((f) => f.id));
   const made = [];
   for (let i = 0; i < saved.length; i++) {
     try {
-      const t = await chrome.tabs.create({
-        windowId: win,
-        url: saved[i].url || undefined,
-        active: false,
-      });
-      made.push({ id: t.id, i });
+      const t = await chrome.tabs.create({ windowId: win, url: saved[i].url || undefined, active: false });
+      made.push({ id: t.id, i, folderId: known.has(saved[i].folderId) ? saved[i].folderId : null });
     } catch {
       /* some internal URLs can't be opened by extensions – skip */
     }
   }
   if (!made.length) {
     const t = await chrome.tabs.create({ windowId: win, active: false });
-    made.push({ id: t.id, i: 0 });
+    made.push({ id: t.id, i: 0, folderId: null });
   }
-  const tf = await getTabFolders();
-  for (const x of made) if (saved[x.i]?.folderId) tf[x.id] = saved[x.i].folderId;
-  await chrome.storage.session.set({ tabFolders: tf });
-  const gid = await chrome.tabs.group({
-    tabIds: made.map((x) => x.id),
-    createProperties: { windowId: win },
-  });
-  await chrome.tabGroups.update(gid, { title: label(space), color: space.color, collapsed: false });
-  await setGroupMapping(win, space.id, gid);
   const keep = made.find((x) => x.i === ai) || made[0];
+  // main group first so it sits before the folder groups
+  const buckets = [[null, made.filter((x) => !x.folderId)]];
+  for (const f of space.folders || []) buckets.push([f.id, made.filter((x) => x.folderId === f.id)]);
+  for (const [folderId, items] of buckets) {
+    if (!items.length) continue;
+    const gid = await chrome.tabs.group({ tabIds: items.map((x) => x.id), createProperties: { windowId: win } });
+    if (folderId) {
+      const f = space.folders.find((x) => x.id === folderId);
+      await chrome.tabGroups.update(gid, {
+        title: folderTitle(space, f), color: space.color, collapsed: !!f.collapsed && !items.some((x) => x.id === keep.id),
+      });
+      await setGroupMapping(win, `${space.id}:${folderId}`, gid);
+    } else {
+      await chrome.tabGroups.update(gid, { title: label(space), color: space.color, collapsed: false });
+      await setGroupMapping(win, space.id, gid);
+    }
+  }
   // Don't keep every restored tab loaded in memory
   for (const x of made) if (x.id !== keep.id && saved[x.i]?.url) chrome.tabs.discard(x.id).catch(() => {});
   return keep.id;
@@ -217,7 +354,7 @@ async function restoreSpace(space, win) {
 
 async function switchSpace(spaceId, win, preferTabId) {
   win = win ?? (await mainWindowId());
-  const { spaces, settings } = await getState();
+  const { spaces } = await getState();
   const target = spaces.find((s) => s.id === spaceId);
   if (!target) return;
 
@@ -226,15 +363,18 @@ async function switchSpace(spaceId, win, preferTabId) {
 
   // 1. bring the target up first so the window never ends up with no visible tab
   let activeTabId;
-  const g = await findGroup(target, win);
-  const tabs = g ? (await chrome.tabs.query({ groupId: g.id })).sort((a, b) => a.index - b.index) : [];
-  if (g && tabs.length) {
-    await chrome.tabGroups.update(g.id, { collapsed: false });
+  const items = await spaceTabs(target, win);
+  if (items.length) {
     const pick =
-      tabs.find((t) => t.id === preferTabId) ||
-      tabs[Math.min(target.activeIdx || 0, tabs.length - 1)] ||
-      tabs[0];
-    activeTabId = pick.id;
+      items.find((x) => x.tab.id === preferTabId) ||
+      items[Math.min(target.activeIdx || 0, items.length - 1)] ||
+      items[0];
+    for (const { folderId, group } of await spaceGroups(target, win)) {
+      const f = (target.folders || []).find((x) => x.id === folderId);
+      const hasPick = pick.folderId === folderId;
+      await chrome.tabGroups.update(group.id, { collapsed: folderId ? !!f?.collapsed && !hasPick : false });
+    }
+    activeTabId = pick.tab.id;
   } else {
     activeTabId = await restoreSpace(target, win);
   }
@@ -253,24 +393,17 @@ async function switchSpace(spaceId, win, preferTabId) {
   }
   await setPinOwner(win, spaceId);
 
-  // 2. park the others
+  // 2. collapse every group of the other spaces
   for (const s of spaces) {
     if (s.id === spaceId) continue;
-    const og = await findGroup(s, win);
-    if (!og) continue;
-    if (settings.suspend) {
-      const ts = await chrome.tabs.query({ groupId: og.id });
-      expectedRemovals.add(og.id);
-      await chrome.tabs.remove(ts.map((t) => t.id));
-    } else {
-      await chrome.tabGroups.update(og.id, { collapsed: true });
-    }
+    for (const { group } of await spaceGroups(s, win)) await chrome.tabGroups.update(group.id, { collapsed: true });
   }
 
   const sess = await getSession();
   sess.active[win] = spaceId;
   await chrome.storage.session.set({ active: sess.active });
   await chrome.storage.local.set({ spaces });
+  scheduleIcon();
 }
 
 async function createSpace({ name, emoji, color }) {
@@ -281,7 +414,7 @@ async function createSpace({ name, emoji, color }) {
   let finalName = base;
   let n = 2;
   while (st.spaces.some((s) => label(s) === `${emoji} ${finalName}`)) finalName = `${base} ${n++}`;
-  const space = { id: crypto.randomUUID(), name: finalName, emoji, color: color || 'blue', tabs: [], activeIdx: 0 };
+  const space = { id: crypto.randomUUID(), name: finalName, emoji, color: color || 'blue', tabs: [], folders: [], activeIdx: 0 };
 
   // First space ever: adopt the window's current loose (unpinned, ungrouped) tabs
   if (st.spaces.length === 0) {
@@ -301,21 +434,30 @@ async function createSpace({ name, emoji, color }) {
   await switchSpace(space.id, win);
 }
 
+async function retitle(space, found) {
+  for (const { group, folderId } of found) {
+    const f = (space.folders || []).find((x) => x.id === folderId);
+    await chrome.tabGroups.update(group.id, {
+      title: folderId ? (f ? folderTitle(space, f) : group.title) : label(space),
+      color: space.color,
+    });
+  }
+}
+
 async function updateSpace(id, patch) {
   const st = await getState();
   const space = st.spaces.find((s) => s.id === id);
   if (!space) return;
-  // find groups using the OLD label before changing anything
+  // find groups using the OLD titles before changing anything
   const found = [];
-  for (const w of await normalWindows()) {
-    const g = await findGroup(space, w.id);
-    if (g) found.push(g);
-  }
+  for (const w of await normalWindows()) found.push(...(await spaceGroups(space, w.id)));
   if (patch.name !== undefined) space.name = (patch.name || '').trim() || space.name;
   if (patch.emoji !== undefined) space.emoji = (patch.emoji || '').trim() || '📁';
+  if (patch.name !== undefined || patch.emoji !== undefined) delete space.rawTitle;
   if (patch.color) space.color = patch.color;
-  for (const g of found) await chrome.tabGroups.update(g.id, { title: label(space), color: space.color });
+  await retitle(space, found);
   await chrome.storage.local.set({ spaces: st.spaces });
+  scheduleIcon();
 }
 
 async function deleteSpace(id, closeTabs) {
@@ -323,30 +465,54 @@ async function deleteSpace(id, closeTabs) {
   const space = st.spaces.find((s) => s.id === id);
   if (!space) return;
   for (const w of await normalWindows()) {
-    const g = await findGroup(space, w.id);
-    if (!g) continue;
-    const ts = await chrome.tabs.query({ groupId: g.id });
-    const ids = ts.map((t) => t.id);
+    const ids = (await spaceTabs(space, w.id)).map((x) => x.tab.id);
+    for (const { group } of await spaceGroups(space, w.id)) expectedRemovals.add(group.id);
     if (!ids.length) continue;
     if (closeTabs) {
-      expectedRemovals.add(g.id);
       // keep the window alive if this would close its last tab
       const all = await chrome.tabs.query({ windowId: w.id });
       if (all.length === ids.length) await chrome.tabs.create({ windowId: w.id, active: true });
       await chrome.tabs.remove(ids);
     } else {
-      expectedRemovals.add(g.id);
       await chrome.tabs.ungroup(ids);
     }
   }
   const sess = await getSession();
-  for (const w of Object.keys(sess.groups)) delete sess.groups[w][id];
+  for (const w of Object.keys(sess.groups))
+    for (const k of Object.keys(sess.groups[w])) if (k.split(':')[0] === id) delete sess.groups[w][k];
   for (const w of Object.keys(sess.active)) if (sess.active[w] === id) delete sess.active[w];
   await chrome.storage.session.set(sess);
   const { pinOwner = {} } = await chrome.storage.local.get('pinOwner');
   for (const w of Object.keys(pinOwner)) if (pinOwner[w] === id) delete pinOwner[w];
   await chrome.storage.local.set({ pinOwner });
   await chrome.storage.local.set({ spaces: st.spaces.filter((s) => s.id !== id) });
+  scheduleIcon();
+}
+
+// Put a tab into a space's main group (folderId null) or one of its folder groups.
+async function putTab(tabId, space, folderId, win) {
+  let g;
+  let key;
+  let title;
+  if (folderId) {
+    const f = (space.folders || []).find((x) => x.id === folderId);
+    if (!f) return putTab(tabId, space, null, win);
+    g = await findFolderGroup(space, f, win);
+    key = `${space.id}:${f.id}`;
+    title = folderTitle(space, f);
+  } else {
+    g = await findGroup(space, win);
+    key = space.id;
+    title = label(space);
+  }
+  if (g) {
+    await chrome.tabs.group({ tabIds: [tabId], groupId: g.id });
+    if (g.collapsed) await chrome.tabGroups.update(g.id, { collapsed: false });
+  } else {
+    const gid = await chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId: win } });
+    await chrome.tabGroups.update(gid, { title, color: space.color, collapsed: false });
+    await setGroupMapping(win, key, gid);
+  }
 }
 
 async function moveTab(tabId, spaceId) {
@@ -356,14 +522,7 @@ async function moveTab(tabId, spaceId) {
   const space = spaces.find((s) => s.id === spaceId);
   if (!space) return;
   if (tab.pinned) await chrome.tabs.update(tabId, { pinned: false });
-  const g = await findGroup(space, win);
-  if (g) {
-    await chrome.tabs.group({ tabIds: [tabId], groupId: g.id });
-  } else {
-    const gid = await chrome.tabs.group({ tabIds: [tabId], createProperties: { windowId: win } });
-    await chrome.tabGroups.update(gid, { title: label(space), color: space.color });
-    await setGroupMapping(win, space.id, gid);
-  }
+  await putTab(tabId, space, null, win);
   await switchSpace(spaceId, win, tabId);
 }
 
@@ -386,32 +545,33 @@ async function cycle(dir) {
 // ---------- view for the popup ----------
 async function getView() {
   const win = await mainWindowId();
-  const { spaces, settings } = await getState();
+  const { spaces } = await getState();
   const cur = await currentSpaceId(win, spaces);
   const owner = await ownerFor(win, spaces);
   const out = [];
+  const info = (t) => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl, active: t.active });
   for (const s of spaces) {
-    const g = await findGroup(s, win);
-    let tabs = null;
-    let open = false;
-    const tf = await getTabFolders();
-    if (g) {
-      const ts = (await chrome.tabs.query({ groupId: g.id })).sort((a, b) => a.index - b.index);
-      if (ts.length) {
-        open = true;
-        tabs = ts.map((t) => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl, active: t.active, folderId: tf[t.id] || null }));
-      }
-    }
-    if (!tabs) tabs = (s.tabs || []).map((t) => ({ ...t }));
+    const items = await spaceTabs(s, win);
+    const open = items.length > 0;
+    const tabs = open
+      ? items.map(({ tab, folderId }) => ({ ...info(tab), folderId }))
+      : (s.tabs || []).map((t) => ({ ...t }));
     const pins =
       s.id === owner
-        ? (await chrome.tabs.query({ windowId: win, pinned: true }))
-            .sort((a, b) => a.index - b.index)
-            .map((t) => ({ id: t.id, title: t.title, url: t.url, favIconUrl: t.favIconUrl, active: t.active }))
+        ? (await chrome.tabs.query({ windowId: win, pinned: true })).sort((a, b) => a.index - b.index).map(info)
         : (s.pins || []).map((p) => ({ ...p }));
     out.push({ id: s.id, name: s.name, emoji: s.emoji, color: s.color, open, tabs, pins, current: s.id === cur, folders: s.folders || [] });
   }
-  return { spaces: out, settings };
+  return { spaces: out };
+}
+
+// ---------- folders (inside a space; each is a tab group) ----------
+async function foldersOp(spaceId, fn) {
+  const st = await getState();
+  const sp = st.spaces.find((x) => x.id === spaceId);
+  if (!sp) return;
+  await fn(sp, st);
+  await chrome.storage.local.set({ spaces: st.spaces });
 }
 
 // ---------- messaging ----------
@@ -422,43 +582,49 @@ const handlers = {
   update: ({ id, patch }) => enqueue(() => updateSpace(id, patch)),
   delete: ({ id, closeTabs }) => enqueue(() => deleteSpace(id, closeTabs)),
   moveCurrent: ({ id }) => enqueue(() => moveCurrent(id)),
-  // Folders live inside a space. They're an organisation layer in the popup (tab groups can't nest).
   createFolder: ({ spaceId, name }) =>
-    enqueue(async () => {
-      const st = await getState();
-      const sp = st.spaces.find((x) => x.id === spaceId);
-      if (!sp) return;
-      sp.folders = [...(sp.folders || []), { id: crypto.randomUUID(), name: (name || '').trim() || 'Folder', collapsed: false }];
-      await chrome.storage.local.set({ spaces: st.spaces });
-    }),
+    enqueue(() =>
+      foldersOp(spaceId, (sp) => {
+        sp.folders = [...(sp.folders || []), { id: crypto.randomUUID(), name: (name || '').trim() || 'Folder', collapsed: false }];
+      })
+    ),
   updateFolder: ({ spaceId, id, patch }) =>
-    enqueue(async () => {
-      const st = await getState();
-      const f = st.spaces.find((x) => x.id === spaceId)?.folders?.find((x) => x.id === id);
-      if (!f) return;
-      if (patch.name !== undefined) f.name = (patch.name || '').trim() || f.name;
-      if (patch.collapsed !== undefined) f.collapsed = !!patch.collapsed;
-      await chrome.storage.local.set({ spaces: st.spaces });
-    }),
-  // Deleting a folder keeps its tabs; they go back to the space's top level.
+    enqueue(() =>
+      foldersOp(spaceId, async (sp) => {
+        const f = (sp.folders || []).find((x) => x.id === id);
+        if (!f) return;
+        const found = [];
+        for (const w of await normalWindows()) found.push(...(await spaceGroups(sp, w.id)));
+        if (patch.name !== undefined) f.name = (patch.name || '').trim() || f.name;
+        if (patch.collapsed !== undefined) f.collapsed = !!patch.collapsed;
+        await retitle(sp, found);
+        if (patch.collapsed !== undefined)
+          for (const x of found) if (x.folderId === id) await chrome.tabGroups.update(x.group.id, { collapsed: f.collapsed });
+      })
+    ),
+  // Deleting a folder keeps its tabs; they go back to the space's main group.
   deleteFolder: ({ spaceId, id }) =>
-    enqueue(async () => {
-      const st = await getState();
-      const sp = st.spaces.find((x) => x.id === spaceId);
-      if (!sp) return;
-      sp.folders = (sp.folders || []).filter((f) => f.id !== id);
-      for (const t of sp.tabs || []) if (t.folderId === id) delete t.folderId;
-      const tf = await getTabFolders();
-      for (const k of Object.keys(tf)) if (tf[k] === id) delete tf[k];
-      await chrome.storage.session.set({ tabFolders: tf });
-      await chrome.storage.local.set({ spaces: st.spaces });
-    }),
+    enqueue(() =>
+      foldersOp(spaceId, async (sp) => {
+        for (const w of await normalWindows()) {
+          const f = (sp.folders || []).find((x) => x.id === id);
+          const g = f && (await findFolderGroup(sp, f, w.id));
+          if (!g) continue;
+          expectedRemovals.add(g.id);
+          for (const t of await chrome.tabs.query({ groupId: g.id })) await putTab(t.id, sp, null, w.id);
+        }
+        sp.folders = (sp.folders || []).filter((f) => f.id !== id);
+        for (const t of sp.tabs || []) if (t.folderId === id) delete t.folderId;
+      })
+    ),
   setTabFolder: ({ tabId, folderId }) =>
     enqueue(async () => {
-      const tf = await getTabFolders();
-      if (folderId) tf[tabId] = folderId;
-      else delete tf[tabId];
-      await chrome.storage.session.set({ tabFolders: tf });
+      const tab = await chrome.tabs.get(tabId);
+      const { spaces } = await getState();
+      const info = await spaceInfoForGroup(tab.groupId, tab.windowId, spaces);
+      const space = spaces.find((s) => s.id === info?.spaceId);
+      if (!space) return;
+      await putTab(tabId, space, folderId || null, tab.windowId);
       scheduleSnapshot();
     }),
   cycle: ({ dir }) => enqueue(() => cycle(dir === -1 ? -1 : 1)),
@@ -470,8 +636,7 @@ const handlers = {
         const { spaces } = await getState();
         const ownerId = await ownerFor(t.windowId, spaces);
         const sp = spaces.find((s) => s.id === ownerId);
-        const g = sp && (await findGroup(sp, t.windowId));
-        if (g) await chrome.tabs.group({ tabIds: [tabId], groupId: g.id });
+        if (sp) await putTab(tabId, sp, null, t.windowId);
       } else {
         await chrome.tabs.update(tabId, { pinned: true });
       }
@@ -479,11 +644,6 @@ const handlers = {
     }),
   focusTab: ({ tabId }) => chrome.tabs.update(tabId, { active: true }),
   closeTab: ({ tabId }) => chrome.tabs.remove(tabId),
-  setSettings: ({ suspend }) =>
-    enqueue(async () => {
-      const st = await getState();
-      await chrome.storage.local.set({ settings: { ...st.settings, suspend: !!suspend } });
-    }),
 };
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -496,10 +656,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
+// ---------- shortcuts ----------
 // Window ids are not stable across browser restarts
 chrome.runtime.onStartup.addListener(() => chrome.storage.local.remove('pinOwner'));
 
-// ---------- shortcuts ----------
 chrome.commands.onCommand.addListener((cmd) => {
   if (cmd === 'next-space') enqueue(() => cycle(1));
   if (cmd === 'prev-space') enqueue(() => cycle(-1));
@@ -524,10 +684,34 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (id.startsWith('move:') && tab) enqueue(() => moveTab(tab.id, id.slice(5)));
 });
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.spaces) enqueue(rebuildMenu);
+  if (area === 'local' && changes.spaces) {
+    enqueue(rebuildMenu);
+    scheduleIcon();
+  }
 });
-chrome.runtime.onInstalled.addListener(() => enqueue(rebuildMenu));
+chrome.runtime.onInstalled.addListener(() => {
+  enqueue(rebuildMenu);
+  scheduleAdopt();
+});
 enqueue(rebuildMenu);
+scheduleAdopt();
+scheduleIcon();
+
+// ---------- clicking a tab in another space's group (e.g. in the vertical sidebar) switches space ----------
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  scheduleIcon();
+  enqueue(async () => {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || tab.groupId === NONE || tab.windowId !== windowId) return;
+    const { spaces } = await getState();
+    const info = await spaceInfoForGroup(tab.groupId, windowId, spaces);
+    if (!info) return;
+    const { active } = await getSession();
+    if (active[windowId] === info.spaceId) return;
+    await switchSpace(info.spaceId, windowId, tabId);
+  }).catch(() => {});
+});
+chrome.windows.onFocusChanged.addListener(scheduleIcon);
 
 // ---------- new tabs (Cmd+T, links, etc.) join the active space ----------
 chrome.tabs.onCreated.addListener((created) =>
@@ -543,15 +727,7 @@ chrome.tabs.onCreated.addListener((created) =>
     const cur = await currentSpaceId(tab.windowId, spaces);
     const space = spaces.find((x) => x.id === cur);
     if (!space) return;
-    const g = await findGroup(space, tab.windowId);
-    if (g) {
-      await chrome.tabs.group({ tabIds: [tab.id], groupId: g.id });
-      if (g.collapsed) await chrome.tabGroups.update(g.id, { collapsed: false });
-    } else {
-      const gid = await chrome.tabs.group({ tabIds: [tab.id], createProperties: { windowId: tab.windowId } });
-      await chrome.tabGroups.update(gid, { title: label(space), color: space.color });
-      await setGroupMapping(tab.windowId, space.id, gid);
-    }
+    await putTab(tab.id, space, null, tab.windowId);
   }).catch(() => {})
 );
 
@@ -564,9 +740,28 @@ chrome.tabs.onCreated.addListener((created) =>
   chrome.tabs.onAttached,
   chrome.tabs.onDetached,
   chrome.tabs.onActivated,
-  chrome.tabGroups.onUpdated,
   chrome.tabGroups.onMoved,
 ].forEach((ev) => ev.addListener(scheduleSnapshot));
+
+chrome.tabGroups.onCreated.addListener(scheduleAdopt);
+chrome.tabGroups.onUpdated.addListener((group) => {
+  scheduleSnapshot();
+  scheduleAdopt();
+  // keep a folder's saved "collapsed" flag in sync with the group collapsing in the sidebar
+  enqueue(async () => {
+    const { spaces } = await getState();
+    const info = await spaceInfoForGroup(group.id, group.windowId, spaces);
+    if (!info?.folderId) return;
+    const { active } = await getSession();
+    if (active[group.windowId] !== info.spaceId) return; // parked by us, not the user
+    const sp = spaces.find((s) => s.id === info.spaceId);
+    const f = sp.folders.find((x) => x.id === info.folderId);
+    if (f && f.collapsed !== group.collapsed) {
+      f.collapsed = group.collapsed;
+      await chrome.storage.local.set({ spaces });
+    }
+  }).catch(() => {});
+});
 
 // If the user empties a space's group themselves, forget its saved tabs
 chrome.tabGroups.onRemoved.addListener((group) => {
@@ -582,13 +777,14 @@ chrome.tabGroups.onRemoved.addListener((group) => {
         }
         const sess = await getSession();
         const m = sess.groups[win] || {};
-        const sid = Object.keys(m).find((k) => m[k] === group.id);
-        if (!sid) return;
-        delete m[sid];
+        const key = Object.keys(m).find((k) => m[k] === group.id);
+        if (!key) return;
+        delete m[key];
         await chrome.storage.session.set({ groups: sess.groups });
+        if (key.includes(':')) return; // a folder group: its tabs just moved elsewhere
         const st = await getState();
-        const s = st.spaces.find((x) => x.id === sid);
-        if (s) {
+        const s = st.spaces.find((x) => x.id === key);
+        if (s && !(await spaceTabs(s, win)).length) {
           s.tabs = [];
           s.activeIdx = 0;
           await chrome.storage.local.set({ spaces: st.spaces });

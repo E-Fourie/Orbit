@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Spaces",
-  "version": "0.3.0",
-  "description": "Arc-style spaces for Brave, built on tab groups. Optional suspend mode closes inactive spaces' tabs and restores them on switch.",
+  "version": "0.4.0",
+  "description": "Arc-style spaces for Brave, built on tab groups. Folders, per-space pinned tabs, auto-detects existing groups, switches when you click a group.",
   "permissions": [
     "tabs",
     "tabGroups",

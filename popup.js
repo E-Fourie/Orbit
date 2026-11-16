@@ -40,7 +40,6 @@ const afterAction = () => (isPopout ? refresh() : window.close());
 
 async function refresh() {
   view = await send('getView');
-  $('#suspend').checked = !!view.settings.suspend;
   render();
 }
 
@@ -210,8 +209,6 @@ $('#edDelClose').addEventListener('click', async () => {
 });
 
 // ----- header buttons -----
-$('#settingsBtn').addEventListener('click', () => ($('#settings').hidden = !$('#settings').hidden));
-$('#suspend').addEventListener('change', (e) => send('setSettings', { suspend: e.target.checked }));
 $('#popout').addEventListener('click', async () => {
   await chrome.windows.create({ url: chrome.runtime.getURL('popup.html?window'), type: 'popup', width: 340, height: 640 });
   window.close();
