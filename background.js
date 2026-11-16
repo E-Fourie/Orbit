@@ -663,7 +663,28 @@ chrome.runtime.onStartup.addListener(() => chrome.storage.local.remove('pinOwner
 chrome.commands.onCommand.addListener((cmd) => {
   if (cmd === 'next-space') enqueue(() => cycle(1));
   if (cmd === 'prev-space') enqueue(() => cycle(-1));
+  if (cmd === 'copy-link') copyCurrentLink();
 });
+
+// ---------- copy the current tab's link ----------
+async function copyCurrentLink() {
+  const win = await mainWindowId();
+  const [tab] = await chrome.tabs.query({ active: true, windowId: win });
+  const url = tab?.url || tab?.pendingUrl;
+  if (!url) return;
+  if (!(await chrome.offscreen.hasDocument())) {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['CLIPBOARD'],
+      justification: 'Copy the current tab URL to the clipboard',
+    });
+  }
+  await chrome.runtime.sendMessage({ type: 'offscreen-copy', text: url });
+  // brief confirmation on the toolbar icon
+  await chrome.action.setBadgeBackgroundColor({ color: '#188038' });
+  await chrome.action.setBadgeText({ text: '✓' });
+  setTimeout(() => chrome.action.setBadgeText({ text: '' }), 1200);
+}
 
 // ---------- context menu: "Move tab to space" ----------
 let menuSig = null;

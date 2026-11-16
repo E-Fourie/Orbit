@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Spaces",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Arc-style spaces for Brave, built on tab groups. Folders, per-space pinned tabs, auto-detects existing groups, switches when you click a group.",
   "permissions": [
     "tabs",
     "tabGroups",
     "storage",
-    "contextMenus"
+    "contextMenus",
+    "offscreen"
   ],
   "background": {
     "service_worker": "background.js"
@@ -33,6 +34,13 @@
         "default": "Alt+Shift+Comma"
       },
       "description": "Switch to previous space"
+    },
+    "copy-link": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+C",
+        "mac": "Command+Shift+C"
+      },
+      "description": "Copy the current tab's link"
     },
     "_execute_action": {
       "suggested_key": {
