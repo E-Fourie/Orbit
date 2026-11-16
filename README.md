@@ -10,7 +10,7 @@ Install: brave://extensions -> enable Developer mode -> Load unpacked -> pick th
 - Existing tab groups are auto-detected as spaces (a group titled "<space> › <name>" becomes a folder of that space). Clicking a tab in another space's group in the sidebar switches to that space and loads its pinned tabs.
 - The toolbar icon shows the active space's emoji.
 - New tabs (Cmd+T, links) are automatically added to the active space.
-- Cmd+Shift+C (Ctrl+Shift+C elsewhere) copies the current tab's link. This may clash with Brave's built-in shortcut for that key; if it does nothing, set it at brave://extensions/shortcuts.
+- Cmd+Alt+C (Ctrl+Alt+C elsewhere) copies the current tab's link; there's also a 🔗 button in the popup. Change the key at brave://extensions/shortcuts.
 - Fallback shortcuts (change at brave://extensions/shortcuts): Alt+Shift+. / Alt+Shift+, next/prev space; Alt+Shift+S opens the popup.
 - The pop-out button opens the list in a small floating window you can park beside your tabs.
 
