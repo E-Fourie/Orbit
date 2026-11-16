@@ -642,6 +642,7 @@ const handlers = {
       }
       scheduleSnapshot();
     }),
+  copyLink: () => copyCurrentLink(),
   focusTab: ({ tabId }) => chrome.tabs.update(tabId, { active: true }),
   closeTab: ({ tabId }) => chrome.tabs.remove(tabId),
 };
@@ -671,19 +672,45 @@ async function copyCurrentLink() {
   const win = await mainWindowId();
   const [tab] = await chrome.tabs.query({ active: true, windowId: win });
   const url = tab?.url || tab?.pendingUrl;
-  if (!url) return;
-  if (!(await chrome.offscreen.hasDocument())) {
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['CLIPBOARD'],
-      justification: 'Copy the current tab URL to the clipboard',
-    });
+  let ok = false;
+  if (url) {
+    // 1. write from inside the page (focused, so the clipboard accepts it)
+    try {
+      const [r] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (text) => {
+          const t = document.createElement('textarea');
+          t.value = text;
+          t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+          document.documentElement.appendChild(t);
+          t.select();
+          const done = document.execCommand('copy');
+          t.remove();
+          return done;
+        },
+        args: [url],
+      });
+      ok = !!r?.result;
+    } catch {}
+    // 2. pages we can't script (brave://, web store…): hidden helper page
+    if (!ok) {
+      try {
+        if (!(await chrome.offscreen.hasDocument())) {
+          await chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: ['CLIPBOARD'],
+            justification: 'Copy the current tab URL to the clipboard',
+          });
+        }
+        const r = await chrome.runtime.sendMessage({ type: 'offscreen-copy', text: url });
+        ok = !!r?.ok;
+      } catch {}
+    }
   }
-  await chrome.runtime.sendMessage({ type: 'offscreen-copy', text: url });
-  // brief confirmation on the toolbar icon
-  await chrome.action.setBadgeBackgroundColor({ color: '#188038' });
-  await chrome.action.setBadgeText({ text: '✓' });
-  setTimeout(() => chrome.action.setBadgeText({ text: '' }), 1200);
+  await chrome.action.setBadgeBackgroundColor({ color: ok ? '#188038' : '#d93025' });
+  await chrome.action.setBadgeText({ text: ok ? '✓' : '!' });
+  setTimeout(() => chrome.action.setBadgeText({ text: '' }), 1500);
+  return ok;
 }
 
 // ---------- context menu: "Move tab to space" ----------

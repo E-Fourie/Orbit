@@ -214,6 +214,10 @@ $('#popout').addEventListener('click', async () => {
   window.close();
 });
 if (isPopout) $('#popout').hidden = true;
+$('#copyLink').addEventListener('click', async () => {
+  const ok = await send('copyLink');
+  toast(ok ? 'Link copied' : 'Could not copy this tab\'s link');
+});
 
 // ----- live refresh -----
 let t;
