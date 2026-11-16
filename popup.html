@@ -26,7 +26,6 @@
 
   <div class="addrow">
     <button id="add" class="add">＋ New space</button>
-    <button id="addFolder" class="add">📁 New folder</button>
   </div>
 
   <form id="folderEditor" hidden>
@@ -37,7 +36,7 @@
       <button type="button" id="fdCancel">Cancel</button>
     </div>
     <div id="fdDanger" class="danger" hidden>
-      <button type="button" id="fdDelete">Delete folder (keeps its spaces)</button>
+      <button type="button" id="fdDelete">Delete folder (keeps its tabs)</button>
     </div>
   </form>
 
@@ -47,7 +46,6 @@
       <input id="edEmoji" maxlength="8" class="emoji-in" aria-label="Emoji">
       <input id="edName" placeholder="Space name" required maxlength="40" aria-label="Name">
     </div>
-    <label class="folder-pick">Folder <select id="edFolder"></select></label>
     <div id="swatches" class="swatches"></div>
     <div class="actions">
       <button type="submit" class="primary">Save</button>

@@ -54,6 +54,7 @@ input[type=text], #edName, #edEmoji { font: inherit; color: inherit; background:
 .danger button { color: #dc2626; font-size: 12px; }
 .addrow { display: flex; gap: 6px; margin-top: 8px; }
 .addrow .add { margin-top: 0; flex: 1; }
+.folder-body .tab { padding-left: 4px; }
 .folder { margin-bottom: 6px; }
 .folder-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: pointer; border-radius: 6px; color: var(--muted); font-weight: 600; }
 .folder-head:hover { background: var(--hover); }
@@ -61,7 +62,9 @@ input[type=text], #edName, #edEmoji { font: inherit; color: inherit; background:
 .folder-head .fname { flex: 1; color: var(--fg); }
 .folder-head button { border: none; background: none; padding: 1px 6px; opacity: .65; }
 .folder-body { margin-left: 10px; padding-left: 6px; border-left: 2px solid var(--border); }
-.folder-pick { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.folder-pick select { flex: 1; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px; }
+.sect-row { display: flex; align-items: center; justify-content: space-between; }
+.mini { font-size: 10px; padding: 0 6px; border: none; background: none; color: var(--muted); }
+.fsel { font-size: 10px; max-width: 70px; opacity: 0; background: var(--bg); color: inherit; border: 1px solid var(--border); border-radius: 4px; }
+.tab:hover .fsel { opacity: .9; }
 #folderEditor { background: var(--card); border-radius: 8px; padding: 10px; margin-top: 8px; }
 [hidden] { display: none !important; }

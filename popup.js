@@ -89,31 +89,40 @@ function render() {
             : null
         );
       const pins = s.pins || [];
-      card.append(
-        el('div', { class: 'tabs' },
-          pins.length ? [el('div', { class: 'sect' }, 'Pinned'), ...pins.map((t) => mk(t, true)), el('div', { class: 'sect' }, 'Tabs')] : null,
-          s.tabs.length ? s.tabs.map((t) => mk(t, false)) : el('div', { class: 'none' }, 'No tabs')
-        )
-      );
+      const folders = s.folders || [];
+      const mkTab = (t, pinned) => {
+        const row = mk(t, pinned);
+        if (!pinned && t.id != null && folders.length) {
+          const sel = el('select', { class: 'fsel', title: 'Move to folder', onclick: (e) => e.stopPropagation(),
+            onchange: (e) => send('setTabFolder', { tabId: t.id, folderId: e.target.value || null }).then(refresh) },
+            el('option', { value: '' }, '—'), ...folders.map((f) => el('option', { value: f.id }, f.name)));
+          sel.value = t.folderId || '';
+          row.insertBefore(sel, row.querySelector('.x'));
+        }
+        return row;
+      };
+      const loose = s.tabs.filter((t) => !folders.some((f) => f.id === t.folderId));
+      const kids = [];
+      if (pins.length) kids.push(el('div', { class: 'sect' }, 'Pinned'), ...pins.map((t) => mk(t, true)));
+      kids.push(el('div', { class: 'sect sect-row' }, 'Tabs',
+        el('button', { class: 'mini', title: 'New folder in this space', onclick: () => openFolderEditor(null, s.id) }, '＋ folder')));
+      for (const f of folders) {
+        const inF = s.tabs.filter((t) => t.folderId === f.id);
+        const open = !f.collapsed;
+        kids.push(el('div', { class: 'folder' },
+          el('div', { class: 'folder-head', onclick: () => send('updateFolder', { spaceId: s.id, id: f.id, patch: { collapsed: open } }).then(refresh) },
+            el('span', { class: 'caret' }, open ? '▼' : '▶'),
+            el('span', { class: 'fname' }, '📁 ' + f.name),
+            el('span', { class: 'meta' }, String(inF.length)),
+            el('button', { title: 'Edit folder', onclick: (e) => { e.stopPropagation(); openFolderEditor(f, s.id); } }, '✎')),
+          open ? el('div', { class: 'folder-body' }, inF.length ? inF.map((t) => mkTab(t, false)) : el('div', { class: 'none' }, 'Empty — use the dropdown on a tab to add it')) : null));
+      }
+      kids.push(...(loose.length ? loose.map((t) => mkTab(t, false)) : folders.length ? [] : [el('div', { class: 'none' }, 'No tabs')]));
+      card.append(el('div', { class: 'tabs' }, kids));
     }
     return card;
   };
-  const folders = view.folders || [];
-  const ids = new Set(folders.map((f) => f.id));
-  for (const f of folders) {
-    const kids = view.spaces.filter((s) => s.folderId === f.id);
-    const hasCurrent = kids.some((s) => s.current);
-    const open = !f.collapsed;
-    const wrap = el('div', { class: 'folder' },
-      el('div', { class: 'folder-head', onclick: () => send('updateFolder', { id: f.id, patch: { collapsed: open } }).then(refresh) },
-        el('span', { class: 'caret' }, open ? '▼' : '▶'),
-        el('span', { class: 'fname' }, '📁 ' + f.name),
-        el('span', { class: 'meta' }, String(kids.length) + (hasCurrent && !open ? ' · active' : '')),
-        el('button', { title: 'Edit folder', onclick: (e) => { e.stopPropagation(); openFolderEditor(f); } }, '✎')));
-    if (open) wrap.append(el('div', { class: 'folder-body' }, kids.length ? kids.map(buildCard) : el('div', { class: 'none' }, 'Empty — edit a space to put it here')));
-    list.append(wrap);
-  }
-  for (const s of view.spaces) if (!s.folderId || !ids.has(s.folderId)) list.append(buildCard(s));
+  for (const s of view.spaces) list.append(buildCard(s));
 }
 
 // ----- editor -----
@@ -137,9 +146,6 @@ function openEditor(space) {
   renderSwatches();
   $('#editor').hidden = false;
   $('.addrow').hidden = true;
-  const sel = $('#edFolder');
-  sel.replaceChildren(el('option', { value: '' }, '— None —'), ...(view.folders || []).map((f) => el('option', { value: f.id }, f.name)));
-  sel.value = space?.folderId || '';
   $('#edName').focus();
 }
 function closeEditor() {
@@ -152,8 +158,10 @@ $('#add').addEventListener('click', () => openEditor(null));
 
 // ----- folder editor -----
 let editingFolder = null;
-function openFolderEditor(f) {
+let folderSpace = null;
+function openFolderEditor(f, spaceId) {
   editingFolder = f || null;
+  folderSpace = spaceId;
   $('#fdTitle').textContent = f ? 'Edit folder' : 'New folder';
   $('#fdName').value = f?.name || '';
   $('#fdDanger').hidden = !f;
@@ -166,25 +174,24 @@ function closeFolderEditor() {
   $('#folderEditor').hidden = true;
   $('.addrow').hidden = false;
 }
-$('#addFolder').addEventListener('click', () => openFolderEditor(null));
 $('#fdCancel').addEventListener('click', closeFolderEditor);
 $('#folderEditor').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('#fdName').value;
-  if (editingFolder) await send('updateFolder', { id: editingFolder.id, patch: { name } });
-  else await send('createFolder', { name });
+  if (editingFolder) await send('updateFolder', { spaceId: folderSpace, id: editingFolder.id, patch: { name } });
+  else await send('createFolder', { spaceId: folderSpace, name });
   closeFolderEditor();
   refresh();
 });
 $('#fdDelete').addEventListener('click', async () => {
   const id = editingFolder.id; closeFolderEditor();
-  await send('deleteFolder', { id });
+  await send('deleteFolder', { spaceId: folderSpace, id });
   refresh();
 });
 $('#edCancel').addEventListener('click', closeEditor);
 $('#editor').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const data = { name: $('#edName').value, emoji: $('#edEmoji').value, color, folderId: $('#edFolder').value || null };
+  const data = { name: $('#edName').value, emoji: $('#edEmoji').value, color };
   if (editing) await send('update', { id: editing.id, patch: data });
   else await send('create', { space: data });
   closeEditor();
