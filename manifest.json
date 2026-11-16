@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "Spaces",
+  "version": "0.3.0",
+  "description": "Arc-style spaces for Brave, built on tab groups. Optional suspend mode closes inactive spaces' tabs and restores them on switch.",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "contextMenus"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Spaces",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png",
+      "48": "icons/48.png"
+    }
+  },
+  "commands": {
+    "next-space": {
+      "suggested_key": {
+        "default": "Alt+Shift+Period"
+      },
+      "description": "Switch to next space (fallback on pages where Shift+Space+. cannot run)"
+    },
+    "prev-space": {
+      "suggested_key": {
+        "default": "Alt+Shift+Comma"
+      },
+      "description": "Switch to previous space"
+    },
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Open the Spaces popup"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

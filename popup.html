@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Spaces</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Spaces</h1>
+    <div class="hdr">
+      <button id="popout" class="icon" title="Open as a floating window (side-panel style)">⧉</button>
+      <button id="settingsBtn" class="icon" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <section id="settings" hidden>
+    <label class="check">
+      <input type="checkbox" id="suspend">
+      <span>Suspend inactive spaces<br><small>Closes their tabs to save memory and restores them when you switch back. Off = just collapse the groups.</small></span>
+    </label>
+  </section>
+
+  <div id="toast" hidden></div>
+  <main id="list"></main>
+
+  <div class="addrow">
+    <button id="add" class="add">＋ New space</button>
+    <button id="addFolder" class="add">📁 New folder</button>
+  </div>
+
+  <form id="folderEditor" hidden>
+    <h2 id="fdTitle">New folder</h2>
+    <div class="field"><input id="fdName" placeholder="Folder name" required maxlength="40" aria-label="Folder name"></div>
+    <div class="actions">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" id="fdCancel">Cancel</button>
+    </div>
+    <div id="fdDanger" class="danger" hidden>
+      <button type="button" id="fdDelete">Delete folder (keeps its spaces)</button>
+    </div>
+  </form>
+
+  <form id="editor" hidden>
+    <h2 id="edTitle">New space</h2>
+    <div class="field">
+      <input id="edEmoji" maxlength="8" class="emoji-in" aria-label="Emoji">
+      <input id="edName" placeholder="Space name" required maxlength="40" aria-label="Name">
+    </div>
+    <label class="folder-pick">Folder <select id="edFolder"></select></label>
+    <div id="swatches" class="swatches"></div>
+    <div class="actions">
+      <button type="submit" class="primary">Save</button>
+      <button type="button" id="edCancel">Cancel</button>
+    </div>
+    <div id="edDanger" class="danger" hidden>
+      <button type="button" id="edDelKeep">Delete (keep tabs)</button>
+      <button type="button" id="edDelClose">Delete &amp; close tabs</button>
+    </div>
+  </form>
+
+  <script src="popup.js"></script>
+</body>
+</html>
