@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Spaces",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Arc-style spaces for Brave, built on tab groups. Folders, per-space pinned tabs, auto-detects existing groups, switches when you click a group.",
   "permissions": [
     "tabs",
@@ -27,13 +27,15 @@
   "commands": {
     "next-space": {
       "suggested_key": {
-        "default": "Alt+Shift+Period"
+        "default": "Ctrl+Shift+Period",
+        "mac": "Command+Shift+Period"
       },
-      "description": "Switch to next space (fallback on pages where Shift+Space+. cannot run)"
+      "description": "Switch to next space"
     },
     "prev-space": {
       "suggested_key": {
-        "default": "Alt+Shift+Comma"
+        "default": "Ctrl+Shift+Comma",
+        "mac": "Command+Shift+Comma"
       },
       "description": "Switch to previous space"
     },

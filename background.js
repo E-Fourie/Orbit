@@ -678,7 +678,11 @@ async function copyCurrentLink() {
     try {
       const [r] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        func: (text) => {
+        func: async (text) => {
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch {}
           const t = document.createElement('textarea');
           t.value = text;
           t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
