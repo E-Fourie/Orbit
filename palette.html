@@ -3,7 +3,14 @@
 <head>
   <meta charset="utf-8">
   <title>Orbit</title>
-  <style>html, body { margin: 0; height: 100%; background: transparent; } .scrim { position: absolute !important; padding-top: 4vh !important; }</style>
+  <style>
+    html, body { margin: 0; height: 100%; background: #fff; }
+    @media (prefers-color-scheme: dark) { html, body { background: #1f2126; } }
+    /* standalone window: the palette fills it instead of floating on a backdrop */
+    .scrim { position: absolute !important; padding: 0 !important; background: none !important; backdrop-filter: none !important; }
+    .box { width: 100% !important; height: 100vh; max-height: none !important; border-radius: 0 !important; box-shadow: none !important; }
+    .list { flex: 1; }
+  </style>
 </head>
 <body>
   <script src="palette-core.js"></script>

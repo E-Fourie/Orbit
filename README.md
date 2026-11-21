@@ -1,4 +1,4 @@
-# Orbit for Brave
+# Orbit
 
 Arc-style spaces and a command palette for Brave, built on tab groups. Brave stays untouched, so it keeps its own updates and security.
 
@@ -14,7 +14,7 @@ Install: brave://extensions -> enable Developer mode -> Load unpacked -> pick th
 - The toolbar icon shows the active space's emoji.
 - New tabs (Cmd+T, links) are automatically added to the active space.
 - Cmd+Shift+X (Ctrl+Shift+X elsewhere) copies the current tab's link; there's also a 🔗 button in the popup. Change the key at brave://extensions/shortcuts.
-- Alt+Shift+S opens the popup (change at brave://extensions/shortcuts).
+- The popup has no default shortcut (Chrome allows only 4 suggested keys); bind "Open the Orbit popup" at brave://extensions/shortcuts if you want one.
 - Shift+Space then `,` / `.` still works as an extra chord on normal web pages (not brave:// pages or text fields).
 - The pop-out button opens the list in a small floating window you can park beside your tabs.
 

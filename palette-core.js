@@ -9,7 +9,7 @@
   padding-top: 13vh; background: rgba(10, 12, 18, .38); backdrop-filter: blur(3px);
   font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --bg: #ffffff; --fg: #1d1f24; --dim: #6b7280; --line: rgba(0,0,0,.08); --sel: rgba(152,198,195,.38); --accent: #3b837f; --chip: rgba(0,0,0,.06);
-  color: var(--fg);
+  color: var(--fg); color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   .scrim { --bg: #1f2126; --fg: #ececf0; --dim: #9aa0aa; --line: rgba(255,255,255,.09); --sel: rgba(152,198,195,.20); --accent: #98c6c3; --chip: rgba(255,255,255,.09); }

@@ -19,18 +19,31 @@ def render(size):
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=S * 0.225, fill=255)
     img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
     img.paste(grad, (0, 0), mask)
-    overlay = Image.new('RGBA', (S, S), (0, 0, 0, 0))
-    d = ImageDraw.Draw(overlay)
-    # 2x2 grid of "spaces"; top-left is the active one (solid white), the rest translucent
-    m = S * (0.17 if size >= 32 else 0.14)   # outer margin
-    gap = S * (0.09 if size >= 32 else 0.10)
-    cell = (S - 2 * m - gap) / 2
-    r = cell * 0.24
-    for i, (cx, cy) in enumerate([(0, 0), (1, 0), (0, 1), (1, 1)]):
-        x0 = m + cx * (cell + gap); y0 = m + cy * (cell + gap)
-        fill = (255, 255, 255, 255) if i == 0 else (255, 255, 255, 150)
-        d.rounded_rectangle([x0, y0, x0 + cell, y0 + cell], radius=r, fill=fill)
-    img = Image.alpha_composite(img, overlay)
+    # Orbit: a planet with a tilted elliptical ring and a small moon
+    import math
+    cx = cy = S / 2
+    small = size < 32
+    rx, ry = S * 0.40, S * 0.16
+    lw = S * (0.075 if small else 0.055)
+    tilt = -28
+    ring = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    ImageDraw.Draw(ring).ellipse([cx - rx, cy - ry, cx + rx, cy + ry], outline=(255, 255, 255, 235), width=round(lw))
+    ring = ring.rotate(tilt, resample=Image.BICUBIC, center=(cx, cy))
+    planet = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    pr = S * (0.20 if small else 0.185)
+    ImageDraw.Draw(planet).ellipse([cx - pr, cy - pr, cx + pr, cy + pr], fill=(255, 255, 255, 255))
+    # moon sitting on the ring, upper right (ring is rotated clockwise by |tilt| on screen)
+    t = math.radians(-12)
+    th = math.radians(-tilt)
+    mx, my = rx * math.cos(t), ry * math.sin(t)
+    mxr = cx + mx * math.cos(th) - my * math.sin(th)
+    myr = cy + mx * math.sin(th) + my * math.cos(th)
+    mr = S * (0.085 if small else 0.07)
+    moon = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    ImageDraw.Draw(moon).ellipse([mxr - mr, myr - mr, mxr + mr, myr + mr], fill=(255, 255, 255, 255))
+    img = Image.alpha_composite(img, ring)
+    img = Image.alpha_composite(img, planet)
+    img = Image.alpha_composite(img, moon)
     return img.resize((size, size), Image.LANCZOS)
 
 for s in (16, 32, 48, 128):
@@ -40,10 +53,10 @@ svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="#7ac4be"/><stop offset="1" stop-color="#2c8280"/></linearGradient></defs>
   <rect width="128" height="128" rx="29" fill="url(#g)"/>
-  <rect x="22" y="22" width="38" height="38" rx="9" fill="#fff"/>
-  <rect x="68" y="22" width="38" height="38" rx="9" fill="#fff" fill-opacity=".59"/>
-  <rect x="22" y="68" width="38" height="38" rx="9" fill="#fff" fill-opacity=".59"/>
-  <rect x="68" y="68" width="38" height="38" rx="9" fill="#fff" fill-opacity=".59"/>
+  <g transform="rotate(-28 64 64)" fill="none" stroke="#fff" stroke-width="7" stroke-opacity=".92">
+    <ellipse cx="64" cy="64" rx="51" ry="20"/></g>
+  <circle cx="64" cy="64" r="24" fill="#fff"/>
+  <circle cx="110" cy="84" r="9" fill="#fff"/>
 </svg>
 '''
 open(os.path.join(OUT, 'icon.svg'), 'w').write(svg)

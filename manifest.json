@@ -55,10 +55,7 @@
       "description": "Open the command palette"
     },
     "_execute_action": {
-      "suggested_key": {
-        "default": "Alt+Shift+S"
-      },
-      "description": "Open the Spaces popup"
+      "description": "Open the Orbit popup"
     }
   },
   "icons": {

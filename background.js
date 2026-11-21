@@ -300,7 +300,7 @@ async function updateIcon() {
     await chrome.action.setIcon({
       imageData: { 16: drawIcon(16, s.emoji || '📁', col), 32: drawIcon(32, s.emoji || '📁', col), 48: drawIcon(48, s.emoji || '📁', col) },
     });
-    await chrome.action.setTitle({ title: `Spaces — ${s.name}` });
+    await chrome.action.setTitle({ title: `Orbit — ${s.name}` });
   } catch (e) {
     console.warn('Spaces: icon update failed', e);
   }
