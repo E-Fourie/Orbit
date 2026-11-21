@@ -38,3 +38,12 @@ window.addEventListener('keyup', (e) => {
 }, true);
 window.addEventListener('blur', () => (spaceHeld = false));
 document.addEventListener('visibilitychange', () => (spaceHeld = false));
+
+// Messages from the background: liveness ping and "show the palette here".
+chrome.runtime.onMessage.addListener((m, _s, send) => {
+  if (m?.type === 'ping') send(true);
+  else if (m?.type === 'togglePalette') {
+    window.__orbitTogglePalette?.();
+    send(true);
+  }
+});

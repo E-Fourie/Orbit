@@ -1,6 +1,6 @@
-// Injected into the active page by the "open-palette" command (after palette-core.js).
-// Runs again on each press: if the palette is already showing, it toggles it closed.
-(() => {
+// Defines window.__orbitTogglePalette: shows the palette overlay on this page, or closes it if already showing.
+// Loaded as a content script (after palette-core.js) and, as a fallback, injected on demand.
+window.__orbitTogglePalette = () => {
   const existing = window.__orbitPaletteHost;
   if (existing?.isConnected) {
     existing.__close();
@@ -21,4 +21,4 @@
   (document.documentElement || document.body).append(host);
   window.__orbitPaletteHost = host;
   window.orbitPalette(root, { close });
-})();
+};

@@ -6,3 +6,9 @@ chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
   t.select();
   sendResponse({ ok: document.execCommand('copy') });
 });
+
+// Reports the browser's light/dark preference as seen from an extension page.
+chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+  if (msg?.type !== 'offscreen-theme') return;
+  sendResponse({ scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' });
+});
