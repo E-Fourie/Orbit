@@ -1,7 +1,10 @@
-# Spaces for Brave
+# Orbit for Brave
+
+Arc-style spaces and a command palette for Brave, built on tab groups. Brave stays untouched, so it keeps its own updates and security.
 
 Install: brave://extensions -> enable Developer mode -> Load unpacked -> pick this folder.
 
+- **Command palette:** Cmd+Shift+K (Ctrl+Shift+K elsewhere). Fuzzy-search every tab across all spaces, switch spaces, or type a URL or search. Enter opens in a new tab, Shift+Enter in the current one. `+ 🔬 Name` creates a space. Commands: new tab, copy link, pin/unpin, close tab, next/previous space, move tab to a space. On brave:// pages and the new tab page it opens as a small centred window instead of an overlay.
 - Each space = a tab group named "<emoji> <name>". Switching expands that space and collapses the others.
 - Pinned tabs are per space: pin a tab (browser menu or the 📌 button) and it belongs to that space; switching swaps the pinned tabs.
 - Right-click a page -> "Move tab to space", or use the arrow button in the popup.

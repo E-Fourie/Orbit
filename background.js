@@ -643,7 +643,30 @@ const handlers = {
       scheduleSnapshot();
     }),
   copyLink: () => copyCurrentLink(),
-  focusTab: ({ tabId }) => chrome.tabs.update(tabId, { active: true }),
+  focusTab: async ({ tabId }) => {
+    const t = await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(t.windowId, { focused: true });
+  },
+  paletteData: async () => {
+    const view = await enqueue(getView);
+    const win = await mainWindowId();
+    const [t] = await chrome.tabs.query({ active: true, windowId: win });
+    return { spaces: view.spaces, cur: t ? { id: t.id, pinned: t.pinned, url: t.url } : null };
+  },
+  // url null = blank new tab. New tabs are adopted into the active space by the usual listeners.
+  openUrl: async ({ url, current }) => {
+    const win = await mainWindowId();
+    const [t] = await chrome.tabs.query({ active: true, windowId: win });
+    if (current && t && url) await chrome.tabs.update(t.id, { url });
+    else await chrome.tabs.create({ windowId: win, ...(url ? { url } : {}) });
+    await chrome.windows.update(win, { focused: true });
+  },
+  search: async ({ text, current }) => {
+    const win = await mainWindowId();
+    const [t] = await chrome.tabs.query({ active: true, windowId: win });
+    await chrome.windows.update(win, { focused: true });
+    await chrome.search.query(current && t ? { text, tabId: t.id } : { text, disposition: 'NEW_TAB' });
+  },
   closeTab: ({ tabId }) => chrome.tabs.remove(tabId),
 };
 
@@ -665,7 +688,38 @@ chrome.commands.onCommand.addListener((cmd) => {
   if (cmd === 'next-space') enqueue(() => cycle(1));
   if (cmd === 'prev-space') enqueue(() => cycle(-1));
   if (cmd === 'copy-link') copyCurrentLink();
+  if (cmd === 'open-palette') openPalette();
 });
+
+// ---------- command palette ----------
+// Overlay injected into the page; on pages we can't script (brave://, new tab, web store) use a small window instead.
+async function openPalette() {
+  const paletteUrl = chrome.runtime.getURL('palette.html');
+  const open = await chrome.tabs.query({ url: paletteUrl });
+  if (open.length) {
+    await chrome.windows.remove(open[0].windowId).catch(() => {});
+    return;
+  }
+  const win = await mainWindowId();
+  const [tab] = await chrome.tabs.query({ active: true, windowId: win });
+  try {
+    if (!tab?.id) throw new Error('no tab');
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['palette-core.js', 'palette.js'] });
+  } catch {
+    const w = await chrome.windows.get(win);
+    const width = 680;
+    const height = 520;
+    await chrome.windows.create({
+      url: paletteUrl,
+      type: 'popup',
+      focused: true,
+      width,
+      height,
+      left: Math.round((w.left ?? 0) + ((w.width ?? width) - width) / 2),
+      top: Math.round((w.top ?? 0) + 90),
+    });
+  }
+}
 
 // ---------- copy the current tab's link ----------
 async function copyCurrentLink() {
