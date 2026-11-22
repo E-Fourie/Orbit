@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Orbit",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "Arc-style spaces and a command palette for Brave, built on tab groups. Folders, per-space pinned tabs, quick tab search, auto-detects existing groups.",
   "permissions": [
     "tabs",

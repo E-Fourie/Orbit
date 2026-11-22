@@ -16,9 +16,24 @@ window.__orbitTogglePalette = () => {
     try { prevFocus?.focus?.(); } catch {}
   };
   host.__close = close;
-  // keep keystrokes away from the page's own hotkeys
-  for (const t of ['keydown', 'keyup', 'keypress']) host.addEventListener(t, (e) => e.stopPropagation());
   (document.documentElement || document.body).append(host);
   window.__orbitPaletteHost = host;
-  window.orbitPalette(root, { close });
+  host.__key = window.orbitPalette(root, { close }).onKey;
 };
+
+// Keep keystrokes away from the page while the palette is open. Pages like Google listen on window in the
+// capture phase and, because the palette's input sits in a shadow root (document.activeElement is just a
+// <div>), think nothing is focused and pull the typing into their own search box. Registered at
+// document_start so it runs before the page's listeners; it stops the event and hands keydown to the
+// palette itself. Default actions (typing into the input) are untouched.
+if (!window.__orbitKeyGuard) {
+  window.__orbitKeyGuard = true;
+  for (const type of ['keydown', 'keyup', 'keypress']) {
+    window.addEventListener(type, (e) => {
+      const host = window.__orbitPaletteHost;
+      if (!host?.isConnected) return;
+      e.stopImmediatePropagation();
+      if (type === 'keydown') host.__key?.(e);
+    }, true);
+  }
+}

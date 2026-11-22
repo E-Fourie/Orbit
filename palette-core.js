@@ -503,7 +503,7 @@ input::placeholder { color: var(--dim); }
     scrim.addEventListener('mousedown', (e) => {
       if (e.target === scrim) done();
     });
-    root.addEventListener('keydown', (e) => {
+    const onKey = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         if (mode) go(null);
@@ -518,7 +518,8 @@ input::placeholder { color: var(--dim); }
         e.preventDefault();
         results[sel]?.run({ shift: e.shiftKey });
       }
-    });
+    };
+    root.addEventListener('keydown', onKey);
 
     input.focus();
     send('paletteData')
@@ -538,6 +539,6 @@ input::placeholder { color: var(--dim); }
       .catch(() => {
         list.replaceChildren(el('div', 'empty', 'Could not load tabs'));
       });
-    return { focus: () => input.focus() };
+    return { focus: () => input.focus(), onKey };
   };
 })();
