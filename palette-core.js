@@ -228,6 +228,7 @@ input::placeholder { color: var(--dim); }
     }
 
     const done = () => close();
+    let webEntry = null; // the "Search for …" / "Open URL" entry for the current query
     const act = (fn) => async (mods) => {
       let r;
       try {
@@ -240,6 +241,7 @@ input::placeholder { color: var(--dim); }
 
     function buildEntries(q) {
       const out = [];
+      webEntry = null;
       const { spaces, cur } = data;
       const curSpace = spaces.find((s) => s.current);
       if (mode) return modeEntries(q);
@@ -387,17 +389,20 @@ input::placeholder { color: var(--dim); }
       }
 
       // Open as URL / search the web
+      // (Shift+Enter runs this entry from any row, so it's kept even when a prefix filters it out of the list.)
       const text = body.trim();
       if (text) {
         const url = looksLikeUrl(text);
-        out.push({
-          kind: url ? 'Open' : 'Search', title: url ? url : `Search for “${text}”`, sub: 'Enter: new tab · Shift+Enter: this tab',
+        webEntry = {
+          kind: url ? 'Open' : 'Search', title: url ? url : `Search for “${text}”`, sub: 'Opens in a new tab · Shift+Enter from any row',
           icon: url ? '🌐' : '🔍', base: url ? 500 : -1, always: true,
-          run: act(async (mods) => {
-            await send(url ? 'openUrl' : 'search', { url, text, current: !!newTab || !!mods?.shift, tabId: newTab?.tabId });
+          run: act(async () => {
+            // as the New Tab page, "new tab" means this (already new) tab
+            await send(url ? 'openUrl' : 'search', { url, text, current: !!newTab, tabId: newTab?.tabId });
             return newTab ? 'stay' : undefined;
           }),
-        });
+        };
+        out.push(webEntry);
       }
       return pfx ? out.filter((e) => PFX[pfx].includes(e.kind)) : out;
     }
@@ -516,7 +521,9 @@ input::placeholder { color: var(--dim); }
         move(-1);
       } else if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
-        results[sel]?.run({ shift: e.shiftKey });
+        // Shift+Enter: search the web (or open the typed URL) in a new tab, whatever row is highlighted
+        if (e.shiftKey && !mode && webEntry) webEntry.run();
+        else results[sel]?.run({ shift: e.shiftKey });
       }
     };
     root.addEventListener('keydown', onKey);
